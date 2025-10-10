@@ -9,6 +9,38 @@ use trieve_server::{
         },
     },
 };
+
+async fn retry_operation<F, Fut, T, E>(
+    operation: F,
+    max_retries: u32,
+    operation_name: &str,
+) -> Result<T, E>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = Result<T, E>>,
+    E: std::fmt::Display,
+{
+    for attempt in 1..=max_retries {
+        println!("{} (attempt {}/{})", operation_name, attempt, max_retries);
+
+        match operation().await {
+            Ok(result) => return Ok(result),
+            Err(e) => {
+                println!("Error on attempt {}: {}", attempt, e);
+                if attempt < max_retries {
+                    println!("Retrying in 2 seconds...");
+                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                } else {
+                    println!("Max retries reached");
+                    return Err(e);
+                }
+            }
+        }
+    }
+
+    unreachable!("Loop should always return");
+}
+
 #[allow(clippy::print_stdout)]
 #[tokio::main]
 async fn main() -> Result<(), ServiceError> {
@@ -34,17 +66,35 @@ async fn main() -> Result<(), ServiceError> {
     let collections = get_qdrant_collections().await?;
     let mut total = 0;
 
+    let start_offset = std::env::var("OFFSET")
+        .ok()
+        .and_then(|offset_str| uuid::Uuid::parse_str(&offset_str).ok())
+        .unwrap_or(uuid::Uuid::nil());
+
+    println!("Starting from offset: {}", start_offset);
+
     for collection in collections {
         println!("starting on collection: {:?}", collection);
 
-        let mut offset = Some(uuid::Uuid::nil().to_string());
+        let mut offset = Some(start_offset.to_string());
 
         while let Some(cur_offset) = offset {
             println!("cur_offset: {}", cur_offset);
-            let (qdrant_point_ids, new_offset) = scroll_qdrant_collection_ids(
-                collection.clone(),
-                Some(cur_offset.to_string()),
-                Some(10000),
+
+            let collection_clone = collection.clone();
+            let cur_offset_clone = cur_offset.to_string();
+
+            let (qdrant_point_ids, new_offset) = retry_operation(
+                || async {
+                    scroll_qdrant_collection_ids(
+                        collection_clone.clone(),
+                        Some(cur_offset_clone.clone()),
+                        Some(10000),
+                    )
+                    .await
+                },
+                3,
+                "Scrolling Qdrant collection",
             )
             .await?;
 
