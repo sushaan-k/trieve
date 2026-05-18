@@ -7,28 +7,30 @@
 import { TrieveSDK } from "../../sdk";
 import {
   $OpenApiTs,
-  Dataset,
+  CreateCrawlReqPayload,
+  CrawlRequest,
   GetCrawlRequestsForDatasetData,
 } from "../../types.gen";
 
 /**
- * Function that provides the ability to create a dataset. This function is used to create a new dataset in the organization.
+ * Function that retrieves all crawl requests for the current dataset, with optional pagination.
  *
  * Example:
  * ```js
- * const dataset = await trieve.createDataset({
- *  dataset_name: "My Dataset",
+ * const crawls = await trieve.getCrawlsForDataset({
+ *   page: 1,
+ *   limit: 10,
  * });
  * ```
  */
 export async function getCrawlsForDataset(
   /** @hidden */
   this: TrieveSDK,
-  props: GetCrawlRequestsForDatasetData,
+  props: Omit<GetCrawlRequestsForDatasetData, "trDataset"> = {},
   signal?: AbortSignal,
-): Promise<Dataset> {
+): Promise<Array<CrawlRequest>> {
   if (!this.datasetId) {
-    throw new Error("Dataset ID is required to create a crawl");
+    throw new Error("Dataset ID is required to get crawls");
   }
 
   return this.trieve.fetch<"eject">(
@@ -37,9 +39,41 @@ export async function getCrawlsForDataset(
     }` as keyof $OpenApiTs,
     "get",
     {
+      datasetId: this.datasetId,
+    },
+    signal,
+  ) as Promise<Array<CrawlRequest>>;
+}
+
+/**
+ * Function that creates a new crawl request for the current dataset.
+ *
+ * Example:
+ * ```js
+ * const crawl = await trieve.createCrawl({
+ *   crawl_options: {
+ *     site_url: "https://example.com",
+ *   },
+ * });
+ * ```
+ */
+export async function createCrawl(
+  /** @hidden */
+  this: TrieveSDK,
+  props: CreateCrawlReqPayload,
+  signal?: AbortSignal,
+): Promise<CrawlRequest> {
+  if (!this.datasetId) {
+    throw new Error("Dataset ID is required to create a crawl");
+  }
+
+  return this.trieve.fetch(
+    "/api/crawl",
+    "post",
+    {
       data: props,
       datasetId: this.datasetId,
     },
     signal,
-  ) as Promise<Dataset>;
+  ) as Promise<CrawlRequest>;
 }
